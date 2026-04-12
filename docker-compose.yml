@@ -10,10 +10,12 @@ services:
       - "8080:8080"
     environment:
       - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/saas_platform
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-multi-tenant-saas-common-assets}
       - AWS_LAMBDA_INVOICE_FUNC=${AWS_LAMBDA_INVOICE_FUNC:-generate-tenant-invoice}
+    volumes:
+      - ${USERPROFILE}/.aws:/home/appuser/.aws:ro
     depends_on:
       mongo:
         condition: service_healthy

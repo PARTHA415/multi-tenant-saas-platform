@@ -4,6 +4,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
@@ -65,15 +67,14 @@ public class AwsConfig {
                 .build();
     }
 
-    private StaticCredentialsProvider credentialsProvider() {
+    private AwsCredentialsProvider credentialsProvider() {
         if (accessKey != null && !accessKey.isBlank() && secretKey != null && !secretKey.isBlank()) {
             return StaticCredentialsProvider.create(
                     AwsBasicCredentials.create(accessKey, secretKey));
         }
-        // Fall back to default credentials provider chain (env vars, instance profile, etc.)
-        // Wrapping DefaultCredentialsProvider result into static for type compatibility
-        return StaticCredentialsProvider.create(
-                AwsBasicCredentials.create("default", "default"));
+        // Fall back to default credentials provider chain:
+        // env vars → system props → web identity token → SSO → profile → EC2 instance profile
+        return DefaultCredentialsProvider.create();
     }
 }
 
