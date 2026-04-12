@@ -5,8 +5,13 @@ import com.multitenant.saas.dto.ProductDTO;
 import com.multitenant.saas.exception.ResourceNotFoundException;
 import com.multitenant.saas.model.Product;
 import com.multitenant.saas.repository.ProductRepository;
+import com.mongodb.client.result.UpdateResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -17,9 +22,16 @@ public class ProductService {
 
     private static final Logger log = LoggerFactory.getLogger(ProductService.class);
     private final ProductRepository productRepository;
+    private final MongoTemplate mongoTemplate;
+    private final CloudWatchMetricsService cloudWatchMetricsService;
+    private final S3StorageService s3StorageService;
 
-    public ProductService(ProductRepository productRepository) {
+    public ProductService(ProductRepository productRepository, MongoTemplate mongoTemplate,
+                          CloudWatchMetricsService cloudWatchMetricsService, S3StorageService s3StorageService) {
         this.productRepository = productRepository;
+        this.mongoTemplate = mongoTemplate;
+        this.cloudWatchMetricsService = cloudWatchMetricsService;
+        this.s3StorageService = s3StorageService;
     }
 
     public ProductDTO createProduct(ProductDTO dto) {
@@ -86,28 +98,45 @@ public class ProductService {
         String tenantId = TenantContext.getTenantId();
         log.info("Selling {} unit(s) of product: {} for tenant: {}", quantity, id, tenantId);
 
-        Product product = productRepository.findByIdAndTenantId(id, tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + id));
+        // Atomic decrement: only succeeds if product exists, is active, and has enough stock
+        Query query = new Query(Criteria.where("_id").is(id)
+                .and("tenantId").is(tenantId)
+                .and("active").is(true)
+                .and("productCount").gte(quantity));
 
-        if (!product.isActive()) {
-            throw new IllegalStateException("Product is not active and cannot be sold");
-        }
+        Update update = new Update().inc("productCount", -quantity);
 
-        if (product.getProductCount() < quantity) {
+        UpdateResult result = mongoTemplate.updateFirst(query, update, Product.class);
+
+        if (result.getModifiedCount() == 0) {
+            // Determine the specific failure reason for a clear error message
+            Product product = productRepository.findByIdAndTenantId(id, tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + id));
+
+            if (!product.isActive()) {
+                throw new IllegalStateException("Product is not active and cannot be sold");
+            }
             throw new IllegalStateException("Insufficient stock. Available: " + product.getProductCount() + ", Requested: " + quantity);
         }
 
-        int newCount = product.getProductCount() - quantity;
-        product.setProductCount(newCount);
+        // Re-read the updated product to check if auto-deactivation is needed
+        Product product = productRepository.findByIdAndTenantId(id, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + id));
 
         // Auto-deactivate if product count reaches 0
-        if (newCount <= 0) {
+        if (product.getProductCount() <= 0) {
             product.setActive(false);
+            product = productRepository.save(product);
             log.info("Product {} auto-deactivated: stock reached 0", id);
+
+            // AWS CloudWatch: record out-of-stock event
+            cloudWatchMetricsService.recordOutOfStockEvent(tenantId, id);
         }
 
-        product = productRepository.save(product);
-        log.info("Product sold: {} unit(s) of {}, remaining: {}", quantity, id, newCount);
+        // AWS CloudWatch: record sell event
+        cloudWatchMetricsService.recordSellEvent(tenantId, id, quantity);
+
+        log.info("Product sold atomically: {} unit(s) of {}, remaining: {}", quantity, id, product.getProductCount());
 
         return toDTO(product);
     }
@@ -118,6 +147,14 @@ public class ProductService {
 
         Product product = productRepository.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + id));
+
+        // AWS S3: delete all product assets (images, files)
+        try {
+            s3StorageService.deleteProductAssets(tenantId, id);
+            log.info("S3 assets deleted for product: {}", id);
+        } catch (Exception e) {
+            log.warn("Failed to delete S3 assets for product {}: {}", id, e.getMessage());
+        }
 
         productRepository.delete(product);
         log.info("Product deleted: {} for tenant: {}", id, tenantId);

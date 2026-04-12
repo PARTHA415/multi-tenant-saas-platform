@@ -33,6 +33,22 @@ app:
     cost-per-api-call: 0.01
     cost-per-storage-unit: 0.001
 
+# ============================================================
+# AWS Configuration (always active)
+# ============================================================
+# Required environment variables:
+#   AWS_ACCESS_KEY_ID / aws.access-key
+#   AWS_SECRET_ACCESS_KEY / aws.secret-key
+# ============================================================
+aws:
+  region: us-east-1
+  access-key: ${AWS_ACCESS_KEY_ID:}
+  secret-key: ${AWS_SECRET_ACCESS_KEY:}
+  s3:
+    bucket-name: ${AWS_S3_BUCKET:multi-tenant-saas-common-assets}
+  lambda:
+    invoice-function-name: ${AWS_LAMBDA_INVOICE_FUNC:generate-tenant-invoice}
+
 logging:
   level:
     root: INFO

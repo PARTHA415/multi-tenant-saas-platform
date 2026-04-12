@@ -14,6 +14,7 @@ public class Invoice extends BaseEntity {
     private LocalDateTime generatedAt;
     private long apiCalls;
     private double storageUsed;
+    private String pdfS3Key;
 
     public Invoice() {}
 
@@ -43,4 +44,7 @@ public class Invoice extends BaseEntity {
 
     public double getStorageUsed() { return storageUsed; }
     public void setStorageUsed(double storageUsed) { this.storageUsed = storageUsed; }
+
+    public String getPdfS3Key() { return pdfS3Key; }
+    public void setPdfS3Key(String pdfS3Key) { this.pdfS3Key = pdfS3Key; }
 }

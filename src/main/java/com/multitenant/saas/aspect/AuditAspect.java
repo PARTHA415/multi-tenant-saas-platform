@@ -3,6 +3,7 @@ package com.multitenant.saas.aspect;
 import com.multitenant.saas.config.TenantContext;
 import com.multitenant.saas.model.AuditLog;
 import com.multitenant.saas.repository.AuditLogRepository;
+import com.multitenant.saas.service.CloudWatchMetricsService;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -20,9 +21,11 @@ public class AuditAspect {
 
     private static final Logger log = LoggerFactory.getLogger(AuditAspect.class);
     private final AuditLogRepository auditLogRepository;
+    private final CloudWatchMetricsService cloudWatchMetricsService;
 
-    public AuditAspect(AuditLogRepository auditLogRepository) {
+    public AuditAspect(AuditLogRepository auditLogRepository, CloudWatchMetricsService cloudWatchMetricsService) {
         this.auditLogRepository = auditLogRepository;
+        this.cloudWatchMetricsService = cloudWatchMetricsService;
     }
 
     @Around("execution(* com.multitenant.saas.service.*.*(..))")
@@ -30,12 +33,17 @@ public class AuditAspect {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();
 
+        // AWS CloudWatch: record every API call per tenant (all operations)
+        String tenantId = TenantContext.getTenantId();
+        if (tenantId != null) {
+            cloudWatchMetricsService.recordApiCall(tenantId, className + "." + methodName);
+        }
+
         // Only audit write operations
         if (!isWriteOperation(methodName)) {
             return joinPoint.proceed();
         }
 
-        String tenantId = TenantContext.getTenantId();
         String userId = getCurrentUserId();
 
         long startTime = System.currentTimeMillis();
@@ -69,7 +77,8 @@ public class AuditAspect {
                methodName.startsWith("register") ||
                methodName.startsWith("login") ||
                methodName.startsWith("generate") ||
-               methodName.startsWith("increment");
+               methodName.startsWith("increment") ||
+               methodName.startsWith("sell");
     }
 
     private String getCurrentUserId() {

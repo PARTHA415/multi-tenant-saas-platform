@@ -12,10 +12,12 @@ public class InvoiceDTO {
     private LocalDateTime generatedAt;
     private long apiCalls;
     private double storageUsed;
+    private String pdfS3Key;
+    private String pdfDownloadUrl;
 
     public InvoiceDTO() {}
-    public InvoiceDTO(String id, String tenantId, BigDecimal amount, String month, String status, LocalDateTime generatedAt, long apiCalls, double storageUsed) {
-        this.id = id; this.tenantId = tenantId; this.amount = amount; this.month = month; this.status = status; this.generatedAt = generatedAt; this.apiCalls = apiCalls; this.storageUsed = storageUsed;
+    public InvoiceDTO(String id, String tenantId, BigDecimal amount, String month, String status, LocalDateTime generatedAt, long apiCalls, double storageUsed, String pdfS3Key, String pdfDownloadUrl) {
+        this.id = id; this.tenantId = tenantId; this.amount = amount; this.month = month; this.status = status; this.generatedAt = generatedAt; this.apiCalls = apiCalls; this.storageUsed = storageUsed; this.pdfS3Key = pdfS3Key; this.pdfDownloadUrl = pdfDownloadUrl;
     }
 
     public String getId() { return id; }
@@ -34,10 +36,14 @@ public class InvoiceDTO {
     public void setApiCalls(long apiCalls) { this.apiCalls = apiCalls; }
     public double getStorageUsed() { return storageUsed; }
     public void setStorageUsed(double storageUsed) { this.storageUsed = storageUsed; }
+    public String getPdfS3Key() { return pdfS3Key; }
+    public void setPdfS3Key(String pdfS3Key) { this.pdfS3Key = pdfS3Key; }
+    public String getPdfDownloadUrl() { return pdfDownloadUrl; }
+    public void setPdfDownloadUrl(String pdfDownloadUrl) { this.pdfDownloadUrl = pdfDownloadUrl; }
 
     public static InvoiceDTOBuilder builder() { return new InvoiceDTOBuilder(); }
     public static class InvoiceDTOBuilder {
-        private String id, tenantId, month, status;
+        private String id, tenantId, month, status, pdfS3Key, pdfDownloadUrl;
         private BigDecimal amount;
         private LocalDateTime generatedAt;
         private long apiCalls;
@@ -50,6 +56,8 @@ public class InvoiceDTO {
         public InvoiceDTOBuilder generatedAt(LocalDateTime generatedAt) { this.generatedAt = generatedAt; return this; }
         public InvoiceDTOBuilder apiCalls(long apiCalls) { this.apiCalls = apiCalls; return this; }
         public InvoiceDTOBuilder storageUsed(double storageUsed) { this.storageUsed = storageUsed; return this; }
-        public InvoiceDTO build() { return new InvoiceDTO(id, tenantId, amount, month, status, generatedAt, apiCalls, storageUsed); }
+        public InvoiceDTOBuilder pdfS3Key(String pdfS3Key) { this.pdfS3Key = pdfS3Key; return this; }
+        public InvoiceDTOBuilder pdfDownloadUrl(String pdfDownloadUrl) { this.pdfDownloadUrl = pdfDownloadUrl; return this; }
+        public InvoiceDTO build() { return new InvoiceDTO(id, tenantId, amount, month, status, generatedAt, apiCalls, storageUsed, pdfS3Key, pdfDownloadUrl); }
     }
 }

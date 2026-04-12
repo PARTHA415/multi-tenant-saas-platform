@@ -45,6 +45,18 @@ public class BillingController {
         InvoiceDTO invoice = billingService.generateInvoice(month);
         return ResponseEntity.ok(ApiResponse.success("Invoice generated successfully", invoice));
     }
+
+    @GetMapping("/invoice/{month}/download")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'TENANT_ADMIN')")
+    @Operation(summary = "Get a pre-signed download URL for the invoice PDF (AWS profile only)")
+    public ResponseEntity<ApiResponse<String>> getInvoiceDownloadUrl(@PathVariable String month) {
+        String downloadUrl = billingService.getInvoiceDownloadUrl(month);
+        if (downloadUrl == null) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Invoice PDF not available. Generate the invoice first or enable AWS profile."));
+        }
+        return ResponseEntity.ok(ApiResponse.success("Download URL generated (expires in 15 minutes)", downloadUrl));
+    }
 }
 
 

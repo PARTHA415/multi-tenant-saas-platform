@@ -5,6 +5,7 @@ import com.multitenant.saas.dto.ProductDTO;
 import com.multitenant.saas.exception.ResourceNotFoundException;
 import com.multitenant.saas.model.Product;
 import com.multitenant.saas.repository.ProductRepository;
+import com.mongodb.client.result.UpdateResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +14,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -21,6 +25,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -28,6 +33,15 @@ class ProductServiceTest {
 
     @Mock
     private ProductRepository productRepository;
+
+    @Mock
+    private MongoTemplate mongoTemplate;
+
+    @Mock
+    private CloudWatchMetricsService cloudWatchMetricsService;
+
+    @Mock
+    private S3StorageService s3StorageService;
 
     @InjectMocks
     private ProductService productService;
@@ -153,38 +167,93 @@ class ProductServiceTest {
     }
 
     @Test
-    @DisplayName("Should sell product and decrease count")
+    @DisplayName("Should sell product and decrease count (atomic)")
     void shouldSellProductAndDecreaseCount() {
+        // Mock atomic update success
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getModifiedCount()).thenReturn(1L);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(Product.class)))
+                .thenReturn(updateResult);
+
+        // After atomic update, product is re-read with decremented count
+        Product updatedProduct = Product.builder()
+                .name("Test Product")
+                .description("Test Description")
+                .price(BigDecimal.valueOf(19.99))
+                .active(true)
+                .productCount(7)
+                .attributes(Map.of("color", "red"))
+                .build();
+        updatedProduct.setId("product-1");
+        updatedProduct.setTenantId("tenant-1");
+
         when(productRepository.findByIdAndTenantId("product-1", "tenant-1"))
-                .thenReturn(Optional.of(sampleProduct));
-        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+                .thenReturn(Optional.of(updatedProduct));
 
         ProductDTO result = productService.sellProduct("product-1", 3);
 
         assertNotNull(result);
         assertEquals(7, result.getProductCount());
         assertTrue(result.isActive());
-        verify(productRepository).save(any(Product.class));
+        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(Product.class));
     }
 
     @Test
-    @DisplayName("Should auto-deactivate product when count reaches 0")
+    @DisplayName("Should auto-deactivate product when count reaches 0 (atomic)")
     void shouldAutoDeactivateWhenCountReachesZero() {
-        sampleProduct.setProductCount(5);
+        // Mock atomic update success
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getModifiedCount()).thenReturn(1L);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(Product.class)))
+                .thenReturn(updateResult);
+
+        // After atomic decrement, product has count 0
+        Product updatedProduct = Product.builder()
+                .name("Test Product")
+                .description("Test Description")
+                .price(BigDecimal.valueOf(19.99))
+                .active(true)
+                .productCount(0)
+                .attributes(Map.of("color", "red"))
+                .build();
+        updatedProduct.setId("product-1");
+        updatedProduct.setTenantId("tenant-1");
+
         when(productRepository.findByIdAndTenantId("product-1", "tenant-1"))
-                .thenReturn(Optional.of(sampleProduct));
-        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+                .thenReturn(Optional.of(updatedProduct));
+
+        // After auto-deactivation, save is called
+        Product deactivatedProduct = Product.builder()
+                .name("Test Product")
+                .description("Test Description")
+                .price(BigDecimal.valueOf(19.99))
+                .active(false)
+                .productCount(0)
+                .attributes(Map.of("color", "red"))
+                .build();
+        deactivatedProduct.setId("product-1");
+        deactivatedProduct.setTenantId("tenant-1");
+
+        when(productRepository.save(any(Product.class))).thenReturn(deactivatedProduct);
 
         ProductDTO result = productService.sellProduct("product-1", 5);
 
         assertNotNull(result);
         assertEquals(0, result.getProductCount());
         assertFalse(result.isActive());
+        verify(productRepository).save(any(Product.class));
     }
 
     @Test
-    @DisplayName("Should throw when selling inactive product")
+    @DisplayName("Should throw when selling inactive product (atomic)")
     void shouldThrowWhenSellingInactiveProduct() {
+        // Atomic update fails (product not active)
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getModifiedCount()).thenReturn(0L);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(Product.class)))
+                .thenReturn(updateResult);
+
+        // When checking failure reason, product is found but inactive
         sampleProduct.setActive(false);
         when(productRepository.findByIdAndTenantId("product-1", "tenant-1"))
                 .thenReturn(Optional.of(sampleProduct));
@@ -194,8 +263,15 @@ class ProductServiceTest {
     }
 
     @Test
-    @DisplayName("Should throw when selling more than available stock")
+    @DisplayName("Should throw when selling more than available stock (atomic)")
     void shouldThrowWhenSellingMoreThanStock() {
+        // Atomic update fails (insufficient stock)
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getModifiedCount()).thenReturn(0L);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(Product.class)))
+                .thenReturn(updateResult);
+
+        // When checking failure reason, product has only 2 units
         sampleProduct.setProductCount(2);
         when(productRepository.findByIdAndTenantId("product-1", "tenant-1"))
                 .thenReturn(Optional.of(sampleProduct));
