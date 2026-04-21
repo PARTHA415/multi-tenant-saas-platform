@@ -28,7 +28,7 @@ public class AuditAspect {
         this.cloudWatchMetricsService = cloudWatchMetricsService;
     }
 
-    @Around("execution(* com.multitenant.saas.service.*.*(..))")
+    @Around("execution(* com.multitenant.saas.service.*.*(..)) && !execution(* com.multitenant.saas.service.CloudWatchMetricsService.*(..)) && !execution(* com.multitenant.saas.service.LambdaInvoiceService.*(..))")
     public Object audit(ProceedingJoinPoint joinPoint) throws Throwable {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();

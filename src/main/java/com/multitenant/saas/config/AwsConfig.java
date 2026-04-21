@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -25,6 +26,9 @@ public class AwsConfig {
 
     @Value("${aws.secret-key:}")
     private String secretKey;
+
+    @Value("${aws.session-token:}")
+    private String sessionToken;
 
     @Bean
     public S3Client s3Client() {
@@ -69,6 +73,12 @@ public class AwsConfig {
 
     private AwsCredentialsProvider credentialsProvider() {
         if (accessKey != null && !accessKey.isBlank() && secretKey != null && !secretKey.isBlank()) {
+            if (sessionToken != null && !sessionToken.isBlank()) {
+                // SSO / temporary credentials with session token
+                return StaticCredentialsProvider.create(
+                        AwsSessionCredentials.create(accessKey, secretKey, sessionToken));
+            }
+            // Long-term IAM user credentials (no session token)
             return StaticCredentialsProvider.create(
                     AwsBasicCredentials.create(accessKey, secretKey));
         }

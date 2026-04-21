@@ -39,11 +39,13 @@ app:
 # Required environment variables:
 #   AWS_ACCESS_KEY_ID / aws.access-key
 #   AWS_SECRET_ACCESS_KEY / aws.secret-key
+#   AWS_SESSION_TOKEN / aws.session-token  (required for SSO/temporary credentials)
 # ============================================================
 aws:
   region: us-east-1
   access-key: ${AWS_ACCESS_KEY_ID:}
   secret-key: ${AWS_SECRET_ACCESS_KEY:}
+  session-token: ${AWS_SESSION_TOKEN:}
   s3:
     bucket-name: ${AWS_S3_BUCKET:multi-tenant-saas-common-assets}
   lambda:
