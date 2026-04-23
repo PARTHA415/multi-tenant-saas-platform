@@ -1,6 +1,6 @@
 # Multi-Tenant SaaS Platform
 
-A production-grade Multi-Tenant SaaS Platform built with **Spring Boot**, **MongoDB**, and **JWT Authentication**.
+A production-grade Multi-Tenant SaaS Platform built with **Spring Boot**, **MongoDB**, **JWT Authentication**, and **AWS**.
 
 ## 🔷 Tech Stack
 
@@ -13,7 +13,7 @@ A production-grade Multi-Tenant SaaS Platform built with **Spring Boot**, **Mong
 | Docker | Containerization |
 | Swagger/OpenAPI | API Documentation |
 | AWS S3 | Tenant-isolated product image & file storage |
-| AWS Lambda | invoice generation |
+| AWS Lambda | Invoice PDF generation |
 | AWS CloudWatch | Per-tenant API call & event metrics |
 | AWS Secrets Manager | Secure credential management (JWT secret, DB URI) |
 
@@ -38,7 +38,7 @@ A production-grade Multi-Tenant SaaS Platform built with **Spring Boot**, **Mong
 - Every successful authenticated request increments the tenant's monthly `apiCalls` counter
 - **Storage** is tracked automatically on S3 file uploads (bytes → MB)
 - Tenants can only **view** their usage (`GET /usage`), not self-report it
-- `SUPER_ADMIN` can manually adjust usage via `POST /usage/admin/adjust` for corrections
+- `SUPER_ADMIN` can manually adjust usage for **any tenant** via `POST /usage/admin/adjust?tenantId={tenantId}`
 
 ## 🔷 Quick Start
 
@@ -46,6 +46,7 @@ A production-grade Multi-Tenant SaaS Platform built with **Spring Boot**, **Mong
 - Docker & Docker Compose
 - Java 17+ (for local development)
 - Maven 3.9+
+- AWS credentials configured (see [AWS Integration](#-aws-integration))
 
 ### Run with Docker Compose
 ```bash
@@ -78,9 +79,11 @@ mvn spring-boot:run
 ### Tenants
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| POST | `/tenants` | Create a tenant | Public |
-| GET | `/tenants` | List all tenants | Public |
-| GET | `/tenants/{id}` | Get tenant by ID | Public |
+| POST | `/tenants` | Create a tenant | **SUPER_ADMIN only** |
+| GET | `/tenants` | List all tenants | **SUPER_ADMIN only** |
+| GET | `/tenants/{id}` | Get tenant by ID | **SUPER_ADMIN only** |
+
+> **Note:** Tenant IDs are provisioned manually and shared with tenant users out-of-band (e.g., during onboarding). Clients must supply the correct `X-Tenant-ID` header when calling `/auth/login`.
 
 ### Users
 | Method | Endpoint | Description | Auth |
@@ -103,9 +106,11 @@ mvn spring-boot:run
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | GET | `/usage` | Get usage data (auto-tracked by system) | SUPER_ADMIN, TENANT_ADMIN |
-| POST | `/usage/admin/adjust` | Manually adjust usage (corrections only) | SUPER_ADMIN only |
+| POST | `/usage/admin/adjust?tenantId={tenantId}` | Manually adjust usage for any tenant (corrections only) | SUPER_ADMIN only |
 
 > **Note:** API calls are **automatically tracked** by the `UsageTrackingFilter` — every successful authenticated request increments the tenant's `apiCalls` counter. Storage usage is tracked automatically on S3 file uploads. Tenants **cannot self-report** usage; they can only **view** it.
+>
+> `SUPER_ADMIN` passes `tenantId` as a query parameter to adjust usage for **any tenant** — not just their own.
 
 ### Billing
 | Method | Endpoint | Description | Auth |
@@ -115,7 +120,7 @@ mvn spring-boot:run
 | POST | `/billing/generate/{month}` | Generate invoice (Lambda generates PDF → S3 → returns key) | SUPER_ADMIN, TENANT_ADMIN |
 | GET | `/billing/invoice/{month}/download` | Get a fresh pre-signed PDF download URL (15-min expiry) | SUPER_ADMIN, TENANT_ADMIN |
 
-### S3 Storage (AWS profile only)
+### S3 Storage
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | POST | `/storage/products/{productId}/image` | Upload product image to S3 | SUPER_ADMIN, TENANT_ADMIN |
@@ -166,9 +171,9 @@ cost = apiCalls × $0.01 + storageUsed × $0.001
 - `storageUsed` — automatically incremented on S3 file/image uploads (tracked in MB)
 - Monthly invoices are auto-generated on the 1st of each month via Spring Scheduler.
 
-### Invoice PDF Flow (AWS profile)
+### Invoice PDF Flow
 
-When running with the `aws` profile, invoices follow a Lambda → S3 → Pre-signed URL flow:
+Invoices follow a Lambda → S3 → Pre-signed URL flow:
 
 ```
 POST /billing/generate/{month}
@@ -206,7 +211,7 @@ POST /billing/generate/{month}
   → Fresh pre-signed URL for PDF download
 ```
 
-**Without AWS profile:** Billing is calculated locally, no PDF is generated, `pdfS3Key` and `pdfDownloadUrl` are `null`.
+**If Lambda function is not deployed:** Billing is calculated locally, no PDF is generated, `pdfS3Key` and `pdfDownloadUrl` are `null`.
 
 ## 🔷 Product Inventory & Sell Flow
 
@@ -255,34 +260,41 @@ POST /products/{id}/sell?quantity=1
 
 ## 🔷 AWS Integration
 
-AWS services are **optional** and activate only when running with the `aws` profile. Without it, the platform runs fully on MongoDB + embedded/Docker MongoDB — no AWS account required.
+AWS services are **always active** — S3, Lambda, CloudWatch, and Secrets Manager are required for full platform functionality. Ensure AWS credentials are configured before running the application.
 
-### Enable AWS Profile
-```bash
-# Via environment variable
-export SPRING_PROFILES_ACTIVE=aws
-
-# Via command line
-java -jar app.jar --spring.profiles.active=aws
-
-# Via Docker
-docker run -e SPRING_PROFILES_ACTIVE=aws -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=xxx saas-platform
-```
-
-### Required Environment Variables (AWS profile)
+### Required Environment Variables
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AWS_ACCESS_KEY_ID` | AWS access key | `AKIAIOSFODNN7EXAMPLE` |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | `wJalrXUtnFEMI/K7MDENG/...` |
+| `AWS_SESSION_TOKEN` | AWS session token (required for SSO/temporary credentials) | `AQoXnyc4lcK4w...` |
+| `AWS_REGION` | AWS region | `us-east-1` |
 | `AWS_S3_BUCKET` | S3 bucket name | `multi-tenant-saas-common-assets` |
 | `AWS_LAMBDA_INVOICE_FUNC` | Lambda function name | `generate-tenant-invoice` |
+
+### Configure via docker-compose.yml
+```yaml
+environment:
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+```
+
+Set credentials in a `.env` file alongside `docker-compose.yml`:
+```
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/...
+AWS_SESSION_TOKEN=AQoXnyc4lcK4w...
+AWS_REGION=us-east-1
+```
 
 ### AWS Services Summary
 
 | Service | What It Does | Triggered By |
 |---------|-------------|--------------|
 | **S3** | Stores product images, tenant files, and **invoice PDFs** in isolated paths; generates **pre-signed download URLs** (15-min expiry) | `POST /storage/products/{id}/image`, `DELETE /products/{id}` (auto-cleanup), `POST /billing/generate/{month}` (PDF upload via Lambda) |
-| **Lambda** | Calculates billing, **generates invoice PDF**, uploads PDF to S3, returns S3 key & amount | `POST /billing/generate/{month}` (synchronous), async trigger via `UsageTrackingFilter` |
+| **Lambda** | Calculates billing, **generates invoice PDF**, uploads PDF to S3, returns S3 key & amount | `POST /billing/generate/{month}` (synchronous) |
 | **CloudWatch** | Records per-tenant metrics: API calls, sell events, out-of-stock, usage | Every service call (via AuditAspect), sell events, usage updates |
 | **Secrets Manager** | Securely stores JWT secret & MongoDB URI (replaces `application.yml` hardcoded values) | App startup |
 
@@ -290,9 +302,9 @@ docker run -e SPRING_PROFILES_ACTIVE=aws -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_
 | Database | Type | Used For |
 |----------|------|----------|
 | **MongoDB** (Docker/Atlas) | NoSQL Document | Tenants, Products, Users, Usage, Invoices, Audit Logs |
-| **S3** | Object Storage | Product images, tenant files |
+| **S3** | Object Storage | Product images, tenant files, invoice PDFs |
 
-### Architecture with AWS
+### Architecture
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Spring Boot App                          │
@@ -303,10 +315,10 @@ docker run -e SPRING_PROFILES_ACTIVE=aws -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬─────┘  │
 │       │              │              │               │       │
 │  ┌────▼──────────────▼──────────────▼───────────────▼────┐  │
-│  │           AWS Services (optional, @Profile("aws"))    │  │
-│  │  ┌──────┐ ┌─────┐ ┌──────────────┐  │  │
-│  │  │Lambda│ │ S3  │ │  CloudWatch  │  │  │
-│  │  └──────┘ └─────┘ └──────────────┘  │  │
+│  │                    AWS Services                       │  │
+│  │        ┌──────┐  ┌─────┐  ┌──────────────┐           │  │
+│  │        │Lambda│  │ S3  │  │  CloudWatch  │           │  │
+│  │        └──────┘  └─────┘  └──────────────┘           │  │
 │  └───────────────────────────────────────────────────────┘  │
 │       │                                                     │
 │  ┌────▼─────────────────────────────────────────────────┐   │
@@ -324,7 +336,7 @@ Multi-Tenant SaaS Platform/
 │   ├── MultiTenantSaasApplication.java
 │   ├── aspect/          # Audit logging AOP + CloudWatch metrics
 │   ├── config/          # TenantContext, WebMvc, DataLoader, OpenAPI, AwsConfig, SecretsManager
-│   ├── controller/      # REST controllers + S3Controller (AWS)
+│   ├── controller/      # REST controllers + S3Controller
 │   ├── dto/             # Data transfer objects (InvoiceDTO includes pdfS3Key & pdfDownloadUrl)
 │   ├── exception/       # Custom exceptions & GlobalExceptionHandler
 │   ├── interceptor/     # Tenant, RateLimit & UsageTracking interceptors/filters
@@ -333,7 +345,7 @@ Multi-Tenant SaaS Platform/
 │   ├── security/        # JWT, SecurityConfig, UserDetailsService
 │   └── service/         # Business logic + AWS services
 │       ├── ProductService.java          # + atomic sells (MongoTemplate), CloudWatch, S3 integration
-│       ├── UsageService.java            # Auto-tracked usage + CloudWatch, Lambda PDF invoice integration
+│       ├── UsageService.java            # Auto-tracked usage + CloudWatch
 │       ├── BillingService.java          # Invoice generation with Lambda PDF + S3 pre-signed URLs
 │       ├── S3StorageService.java        # AWS S3 (tenant-isolated storage + pre-signed URL generation)
 │       ├── LambdaInvoiceService.java    # AWS Lambda (invoice PDF generation + billing calculation)
@@ -345,4 +357,3 @@ Multi-Tenant SaaS Platform/
     └── src/main/java/com/multitenant/lambda/
         └── InvoiceLambdaHandler.java    # Billing calc + PDF generation (iText) + S3 upload
 ```
-

@@ -1,6 +1,5 @@
 package com.multitenant.saas.controller;
 
-import com.multitenant.saas.config.TenantContext;
 import com.multitenant.saas.dto.ApiResponse;
 import com.multitenant.saas.dto.UsageDTO;
 import com.multitenant.saas.service.UsageService;
@@ -41,9 +40,10 @@ public class UsageController {
      */
     @PostMapping("/admin/adjust")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    @Operation(summary = "Manually adjust usage (admin only, for corrections)")
-    public ResponseEntity<ApiResponse<UsageDTO>> adjustUsage(@RequestBody UsageDTO usageDTO) {
-        String tenantId = TenantContext.getTenantId();
+    @Operation(summary = "Manually adjust usage for any tenant (admin only, for corrections)")
+    public ResponseEntity<ApiResponse<UsageDTO>> adjustUsage(
+            @RequestParam String tenantId,
+            @RequestBody UsageDTO usageDTO) {
         UsageDTO updated = usageService.updateUsageInternal(
                 tenantId,
                 usageDTO.getApiCalls(),
